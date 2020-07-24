@@ -164,6 +164,7 @@ class RuleSet(object):
             elif all([hasattr(rule.conditions, att_name.lower()) for rule in self]):
                 df[col_name] = [rule.conditions.get_param(att_name) for rule in self]
 
+        df.dropna(axis=1, inplace=True)
         return df
 
     def calc_pred(self, y_train: np.ndarray, x_train: np.ndarray = None,

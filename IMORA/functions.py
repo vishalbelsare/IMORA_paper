@@ -1,5 +1,6 @@
 import operator
 import functools
+import copy
 from collections import Counter
 import numpy as np
 
@@ -9,12 +10,121 @@ import matplotlib.pyplot as plt
 from sklearn.exceptions import NotFittedError
 
 from typing import List, Union
-# from IMORA.ruleset import RuleSet
+from IMORA.ruleset import RuleSet
 # from IMORA.rule import Rule
 
 
+def find_bins(x, nb_bucket):
+    """
+    Function used to find the bins to discretize xcol in nb_bucket modalities
+
+    Parameters
+    ----------
+    x : {Series type}
+           Serie to discretize
+
+    nb_bucket : {int type}
+                Number of modalities
+
+    Return
+    ------
+    bins : {ndarray type}
+           The bins for disretization (result from numpy percentile function)
+    """
+    # Find the bins for nb_bucket
+    q_list = np.arange(100.0 / nb_bucket, 100.0, 100.0 / nb_bucket)
+    bins = np.array([np.nanpercentile(x, i) for i in q_list])
+
+    if bins.min() != 0:
+        test_bins = bins / bins.min()
+    else:
+        test_bins = bins
+
+    # Test if we have same bins...
+    while len(set(test_bins.round(5))) != len(bins):
+        # Try to decrease the number of bucket to have unique bins
+        nb_bucket -= 1
+        q_list = np.arange(100.0 / nb_bucket, 100.0, 100.0 / nb_bucket)
+        bins = np.array([np.nanpercentile(x, i) for i in q_list])
+        if bins.min() != 0:
+            test_bins = bins / bins.min()
+        else:
+            test_bins = bins
+
+    return bins
+
+
+def discretize(x, nb_bucket, bins=None):
+    """
+    Function used to have discretize xcol in nb_bucket values
+    if xcol is a real series and do nothing if xcol is a string series
+
+    Parameters
+    ----------
+    x : {Series type}
+           Series to discretize
+
+    nb_bucket : {int type}
+                Number of modalities
+
+    bins : {ndarray type}, optional, default None
+           If you have already calculate the bins for xcol
+
+    Return
+    ------
+    x_discretized : {Series type}
+                       The discretization of xcol
+    """
+    if np.issubdtype(x.dtype, np.floating):
+        # extraction of the list of xcol values
+        notnan_vector = np.extract(np.isfinite(x), x)
+        nan_index = ~np.isfinite(x)
+        # Test if xcol have more than nb_bucket different values
+        if len(set(notnan_vector)) >= nb_bucket or bins is not None:
+            if bins is None:
+                bins = find_bins(x, nb_bucket)
+            # discretization of the xcol with bins
+            x_discretized = np.digitize(x, bins=bins)
+            x_discretized = np.array(x_discretized, dtype='float')
+
+            if sum(nan_index) > 0:
+                x_discretized[nan_index] = np.nan
+
+            return x_discretized
+
+        return x
+
+    else:
+        return x
+
+
+def select_rs(rs, gamma=1.0, selected_rs=None):
+    """
+    Returns a subset of a given rs. This subset is seeking by
+    minimization/maximization of the criterion on the training set
+    """
+    # Then optimization
+    if selected_rs is None or len(selected_rs) == 0:
+        selected_rs = RuleSet(rs[:1])
+        id_rule = 1
+    else:
+        id_rule = 0
+
+    nb_rules = len(rs)
+
+    for i in range(id_rule, nb_rules):
+        rs_copy = copy.deepcopy(selected_rs)
+        new_rules = rs[i]
+        # Test union criteria for each rule in the current selected RuleSet
+        utest = [new_rules.union_test(rule.get_activation(), gamma) for rule in rs_copy]
+        if all(utest) and new_rules.union_test(selected_rs.calc_activation(), gamma):
+            selected_rs.append(new_rules)
+
+    return selected_rs
+
+
 def check_is_fitted(estimator):
-    if len(estimator.rule_list) == 0:
+    if len(estimator.rules_list) == 0:
         msg = ("This %(name)s instance is not fitted yet. Call 'fit' with "
                "appropriate arguments before using this estimator.")
         raise NotFittedError(msg % {'name': type(estimator).__name__})
@@ -238,19 +348,21 @@ def calc_criterion(pred: float, y: np.ndarray, method: str = 'mse'):
     criterion : {float type}
            Criteria value
     """
-    prediction_vector = pred * y.astype('bool')
+    criterion = []
+    for i in range(y.ndim):
+        prediction_vector = pred[i] * y[:, i].astype('bool')
 
-    if method == 'mse':
-        criterion = mse_function(prediction_vector, y)
+        if method == 'mse':
+            criterion.append(mse_function(prediction_vector, y[:, i]))
 
-    elif method == 'mae':
-        criterion = mae_function(prediction_vector, y)
+        elif method == 'mae':
+            criterion.append(mae_function(prediction_vector, y[:, i]))
 
-    elif method == 'aae':
-        criterion = aae_function(prediction_vector, y)
+        elif method == 'aae':
+            criterion.append(aae_function(prediction_vector, y[:, i]))
 
-    else:
-        raise 'Method %s unknown' % method
+        else:
+            raise 'Method %s unknown' % method
 
     return criterion
 

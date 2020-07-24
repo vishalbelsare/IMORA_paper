@@ -1,5 +1,6 @@
 import numpy as np
 from sklearn.metrics import accuracy_score, r2_score
+from scipy.spatial import distance
 from IMORA import functions as f
 from IMORA.ruleconditions import RuleConditions
 
@@ -22,7 +23,9 @@ class Rule(object):
         return self.__str__()
 
     def __eq__(self, other):
-        return self.conditions == other.conditions
+        act1 = self.get_activation()
+        act2 = other.get_activation()
+        return sum(abs(act1 - act2)) <= 0.05 * len(act1)
 
     def __gt__(self, val):
         return self.get_param('pred') > val
@@ -183,17 +186,18 @@ class Rule(object):
         if sum(activation_vector) > 0:
             self.set_params(activation=activation_vector)
 
-            y_fillna = np.nan_to_num(y)
-            y_cond = np.extract(activation_vector, y_fillna)
-
             cov = f.calc_coverage(activation_vector)
             self.set_params(cov=cov)
 
+            y_fillna = np.nan_to_num(y)
+            y_cond = np.array([np.extract(activation_vector, y_fillna[:, i])
+                               for i in range(y.ndim)]).T
+
             # prediction = f.calc_prediction(activation_vector, y_fillna)
-            self.set_params(pred=np.mean(y_cond))
+            self.set_params(pred=y_cond.mean(axis=0))
 
             # cond_var = f.calc_variance(activation_vector, y)
-            self.set_params(var=np.var(y_cond))
+            self.set_params(var=y_cond.var(axis=0))
 
             rez = f.calc_criterion(self.get_param('pred'), y_cond, method)
             self.set_params(crit=rez)
